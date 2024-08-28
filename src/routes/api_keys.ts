@@ -8,24 +8,21 @@ import { encryptSecret } from "../encryption"
 const router = express.Router({ mergeParams: true })
 const prisma = new PrismaClient()
 
-// TODO: Check authed user is same as requested user, unless admin
-
 router.get("/", authenticate, async (req, res) => {
-    // @ts-ignore: 401 will already be returned if no user found
-    if (parseInt(req.params.user_id) != req.user.id) {
-        res.status(401)
-    }
-
     // @ts-ignore: 401 will already be returned if no user found
     const api_keys = await prisma.apiKey.findMany({ where: { user_id: req.user.id }})
     res.json(api_keys)
 })
 
 router.get("/:api_key_id", authenticate, async (req, res) => {
-    const api_key = await prisma.apiKey.findFirstOrThrow({
+    const api_key = await prisma.apiKey.findFirst({
         // @ts-ignore: 401 will already be returned if no user found
         where: { id: parseInt(req.params.api_key_id), user_id: req.user.id }
     })
+
+    if (!api_key)
+        return res.status(404).json({ error: `API key ${req.params.api_key_id} not found`})
+    
     res.json(api_key)
 })
 
@@ -33,10 +30,13 @@ router.post("/", authenticate, async (req, res) => {
     const api_key_unencrypted = generateApiKey()
     const api_key_encrypted = await encryptSecret(api_key_unencrypted)
 
-    const user = await prisma.user.findFirstOrThrow({
+    const user = await prisma.user.findFirst({
         // @ts-ignore: 401 will already be returned if no user found
         where: { id: req.user.id }
     })
+
+    if (!user)
+        return res.status(404).json({ error: `User ${req.params.user_id} not found`})
 
     const api_key = await prisma.apiKey.create({
         data: { user_id: user.id, token_digest: api_key_encrypted }
@@ -49,10 +49,14 @@ router.post("/", authenticate, async (req, res) => {
 
 router.delete("/:api_key_id", authenticate, async (req, res) => {
     const api_key_id = req.params.api_key_id
-    await prisma.apiKey.delete({
+    const api_key = await prisma.apiKey.delete({
         // @ts-ignore: 401 will already be returned if no user found
         where: { id: parseInt(api_key_id), user_id: req.user.id }
     })
+
+    if (!api_key)
+        return res.status(404).json({ error: `API key ${req.params.api_key_id} not found`})
+
     res.send(`API key ${api_key_id} deleted`)
 })
 

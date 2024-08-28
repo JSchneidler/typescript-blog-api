@@ -23,36 +23,49 @@ export default async function authenticate(req: Request, res: Response, next: Ne
 
     const contents = authHeader.substring(authHeader.indexOf(" ") + 1)
 
-    try {
-        if (isBasic) {
-            const b64Decoded = Buffer.from(contents, "base64").toString("utf-8")
-            const [ name, password ] = b64Decoded.split(":")
-            const user = await prisma.user.findFirstOrThrow({ where: { name }})
-            if (await compareSecret(password, user.password_digest))
+    if (isBasic) {
+        const b64Decoded = Buffer.from(contents, "base64").toString("utf-8")
+        const [ name, password ] = b64Decoded.split(":")
+        const user = await prisma.user.findFirst({ where: { name }})
+
+        if (!user)
+            return res.status(401).json({ error: "Missing or invalid token" })
+
+        if (await compareSecret(password, user.password_digest)) {
+            // @ts-ignore: 401 will already be returned if no user was found
+            if (parseInt(req.params.user_id) != user.id)
+                return res.status(401).json({ error: "Missing or invalid token" })
+
+            req.user = user
+            return next()
+        }
+
+        return res.status(401).json({ error: "Missing or invalid token" })
+    } else if (isBearer) {
+        const [ user_id, key ] = contents.split(":")
+
+        if (key.length !== 32)
+            return res.status(401).json({ error: "Missing or invalid token" })
+
+        const user = await prisma.user.findFirst({ where: {id: parseInt(user_id) }})
+
+        if (!user)
+            return res.status(401).json({ error: "Missing or invalid token" })
+        
+        const api_keys = await prisma.apiKey.findMany({ where: { user_id: user.id } })
+        for (const api_key of api_keys) {
+            if (await compareSecret(key, api_key.token_digest)) {
+                // @ts-ignore: 401 will already be returned if no user was found
+                if (parseInt(req.params.user_id) != user.id)
+                    return res.status(401).json({ error: "Missing or invalid token" })
+
                 req.user = user
-            else
-                return res.status(401).json({ error: "Missing or invalid token" })
-        } else if (isBearer) {
-            const [ user_id, key ] = contents.split(":")
-
-            if (key.length !== 32)
-                return res.status(401).json({ error: "Missing or invalid token" })
-
-            const user = await prisma.user.findFirstOrThrow({ where: {id: parseInt(user_id) }})
-            const api_keys = await prisma.apiKey.findMany({ where: { user_id: user.id } })
-            for (const api_key of api_keys) {
-                if (await compareSecret(key, api_key.token_digest)) {
-                    req.user = user
-                    next()
-                }
+                return next()
             }
-            return res.status(401).json({ error: "Missing or invalid token" })
-        } else
-            return res.status(401).json({ error: "Missing or invalid token" })
+        }
 
-        next()
-    } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code == "P2025")
-            return res.status(401).json({ error: "Missing or invalid token" })
+        return res.status(401).json({ error: "Missing or invalid token" })
     }
+
+    return next()
 }
