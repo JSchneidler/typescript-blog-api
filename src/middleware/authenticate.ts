@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import { Prisma, PrismaClient, User } from "@prisma/client"
-import { compareSecret } from "./encryption";
+import { PrismaClient, User } from "@prisma/client"
+
+import { compareSecret } from "../encryption";
 
 const prisma = new PrismaClient()
 
@@ -32,10 +33,6 @@ export default async function authenticate(req: Request, res: Response, next: Ne
             return res.status(401).json({ error: "Missing or invalid token" })
 
         if (await compareSecret(password, user.password_digest)) {
-            // @ts-ignore: 401 will already be returned if no user was found
-            if (parseInt(req.params.user_id) != user.id)
-                return res.status(401).json({ error: "Missing or invalid token" })
-
             req.user = user
             return next()
         }
@@ -55,10 +52,6 @@ export default async function authenticate(req: Request, res: Response, next: Ne
         const api_keys = await prisma.apiKey.findMany({ where: { user_id: user.id } })
         for (const api_key of api_keys) {
             if (await compareSecret(key, api_key.token_digest)) {
-                // @ts-ignore: 401 will already be returned if no user was found
-                if (parseInt(req.params.user_id) != user.id)
-                    return res.status(401).json({ error: "Missing or invalid token" })
-
                 req.user = user
                 return next()
             }
